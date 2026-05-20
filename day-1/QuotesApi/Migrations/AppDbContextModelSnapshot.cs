@@ -16,6 +16,24 @@ namespace QuotesApi.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
+            modelBuilder.Entity("QuotesApi.Models.Collection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OwnerId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Collections");
+                });
+
             modelBuilder.Entity("QuotesApi.Models.Quote", b =>
                 {
                     b.Property<int>("Id")
@@ -33,6 +51,28 @@ namespace QuotesApi.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Quotes");
+                });
+
+            modelBuilder.Entity("QuotesApi.Models.Collection", b =>
+                {
+                    b.OwnsMany("QuotesApi.Models.CollectionItem", "Items", b1 =>
+                        {
+                            b1.Property<int>("CollectionId")
+                                .HasColumnType("INTEGER");
+
+                            b1.Property<int>("Id")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("INTEGER");
+
+                            b1.HasKey("CollectionId", "Id");
+
+                            b1.ToTable("CollectionItem");
+
+                            b1.WithOwner()
+                                .HasForeignKey("CollectionId");
+                        });
+
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }
