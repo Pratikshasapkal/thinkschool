@@ -1,4 +1,5 @@
 namespace QuotesApi.Models;
+using QuotesApi.Abstractions;
 
 public class Collection
 {
@@ -8,16 +9,22 @@ public class Collection
 
     public int OwnerId { get; private set; }
 
+    private readonly IClock _clock;
+
     public List<CollectionItem> Items { get; private set; } = new();
 
     private Collection()
     {
+        _clock = default!;
     }
 
     public Collection(
         string name,
-        int ownerId)
+        int ownerId,
+        IClock clock)
     {
+        _clock = clock;
+
         SetName(name);
 
         OwnerId = ownerId;
@@ -56,7 +63,7 @@ public class Collection
 
         Items.Add(new CollectionItem(
             quoteId,
-            DateTime.UtcNow));
+            _clock.UtcNow.UtcDateTime));
     }
 
     public void RemoveItem(int quoteId)
