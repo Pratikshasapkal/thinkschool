@@ -13,8 +13,11 @@ using QuotesApi.Models;
 using QuotesApi.Repositories;
 using QuotesApi.Services;
 using QuotesApi.Utilities;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Events;
+using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -204,6 +207,32 @@ builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMetrics();
 builder.Services.AddSingleton<ApiMetrics>();
+
+// OpenTelemetry distributed tracing.
+//
+// Every incoming HTTP request becomes a root span; EF Core queries and outbound
+// HTTP calls (Entra token validation) become child spans automatically.
+//
+// Serilog TraceId alignment:
+//   CorrelationIdMiddleware reads Activity.Current.TraceId, so every log line
+//   carries the same ID as the OTel span — one search finds both logs and traces.
+//
+// Collector configuration (no code change needed):
+//   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  (Jaeger / Grafana Tempo / Honeycomb)
+//   OTEL_EXPORTER_OTLP_PROTOCOL=grpc                  (default)
+//   OTEL_SERVICE_NAME=QuotesApi                        (overrides the value below)
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService(
+        serviceName: builder.Configuration["OpenTelemetry:ServiceName"] ?? "QuotesApi",
+        serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0"))
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation(opts =>
+        {
+            opts.RecordException = true;
+        })
+        .AddEntityFrameworkCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter());
 
 
 string GenerateRefreshToken()
