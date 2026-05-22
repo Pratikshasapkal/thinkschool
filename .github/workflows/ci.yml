@@ -1,23 +1,208 @@
-name: CI
+name: Quotes API — CI
 
+# Triggers on every push to every branch and on PRs targeting main.
+# workflow_dispatch allows a manual run from the Actions tab.
 on:
   push:
-    branches: ["main"]
+    branches:
+      - '**'
   pull_request:
-    branches: ["main"]
+    branches:
+      - main
+  workflow_dispatch:
+
+# Cancel any in-flight run for the same workflow+ref when a new commit arrives.
+# This prevents queuing up stale runs on rapid pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
-  test:
-    name: Build and Test
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 1 — fast build gate
+  #
+  # Compiles every test project (which transitively compiles QuotesApi).
+  # Failing here blocks both downstream test jobs immediately, avoiding
+  # a wasted Docker-pull on a broken build.
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build
     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+    defaults:
+      run:
+        working-directory: day-1
 
-      - name: Setup .NET
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ env.DOTNET_VERSION }}
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('day-1/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: |
+          dotnet restore Tests.Domain/Tests.Domain.csproj
+          dotnet restore Quotes.Tests.Integration/Quotes.Tests.Integration.csproj
+
+      - name: Build
+        run: |
+          dotnet build Tests.Domain/Tests.Domain.csproj \
+            --no-restore \
+            -c Release
+          dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
+            --no-restore \
+            -c Release
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 2 — unit tests (no Docker, fast)
+  #
+  # Tests.Domain covers domain-model logic for Quote, Collection, and
+  # RefreshToken in pure isolation — no database, no HTTP stack.
+  # ───────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    needs: build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: day-1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('day-1/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Tests.Domain/Tests.Domain.csproj
+
+      - name: Build
+        run: |
+          dotnet build Tests.Domain/Tests.Domain.csproj \
+            --no-restore \
+            -c Release
 
       - name: Test
-        run: dotnet test day-1/QuotesApi.Tests/QuotesApi.Tests.csproj --verbosity normal
+        run: |
+          dotnet test Tests.Domain/Tests.Domain.csproj \
+            --no-build \
+            -c Release \
+            --logger "trx;LogFileName=unit.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory "${{ github.workspace }}/test-results/unit"
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-${{ github.run_number }}
+          path: ${{ github.workspace }}/test-results/unit/
+          retention-days: 30
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 3 — SQL Server integration tests via Testcontainers
+  #
+  # How it works:
+  #   - ubuntu-latest runners ship with Docker Engine pre-installed.
+  #   - SqlServerContainerFixture starts ONE mcr.microsoft.com/mssql/server:2022-latest
+  #     container via the xUnit [CollectionDefinition] fixture.
+  #   - All test classes share [Collection("SqlServer")], so xUnit serialises them
+  #     and the container is started once and stopped once per run.
+  #   - Each CustomWebApplicationFactory creates a GUID-named database, runs all
+  #     EF Core migrations (Migrate()), seeds one admin user, then discards it
+  #     (the container is destroyed when the job finishes anyway).
+  #   - Zero shared state: each [Fact] gets a fresh factory → fresh database.
+  # ───────────────────────────────────────────────────────────────────────────
+  integration-tests:
+    name: Integration Tests — SQL Server (Testcontainers)
+    needs: build
+    runs-on: ubuntu-latest
+    # 30-minute ceiling: image pull (~1 min) + build (~1 min) + 48 migration
+    # runs + test execution.  Increase only if the suite grows significantly.
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: day-1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('day-1/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Quotes.Tests.Integration/Quotes.Tests.Integration.csproj
+
+      - name: Build
+        run: |
+          dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
+            --no-restore \
+            -c Release
+
+      # Separate image pull from test execution so the CI timeline clearly shows
+      # download time vs. actual test time.  Also prevents Testcontainers from
+      # timing out on the first test if the pull is slow on a cold runner.
+      - name: Pre-pull SQL Server 2022 image
+        run: docker pull mcr.microsoft.com/mssql/server:2022-latest
+
+      - name: Test
+        run: |
+          dotnet test Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
+            --no-build \
+            -c Release \
+            --logger "trx;LogFileName=integration.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory "${{ github.workspace }}/test-results/integration" \
+            --blame-hang-timeout 10m \
+            --blame-crash
+        env:
+          # Explicit socket path removes ambiguity if the runner layout ever changes.
+          DOCKER_HOST: unix:///var/run/docker.sock
+          # Ryuk (Testcontainers resource reaper) is intentionally left enabled.
+          # It cleans up containers/networks/volumes on early cancellation.
+
+      # Always upload so failures are diagnosable even when the job is red.
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results-${{ github.run_number }}
+          path: ${{ github.workspace }}/test-results/integration/
+          retention-days: 30
