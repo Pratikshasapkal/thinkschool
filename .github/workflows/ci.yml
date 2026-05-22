@@ -1,5 +1,38 @@
 name: Quotes API — CI
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# BRANCH PROTECTION — REQUIRED STATUS CHECKS
+#
+# To enforce this workflow before merging into main, go to:
+#   GitHub → Settings → Branches → Add branch protection rule → "main"
+#
+# Under "Require status checks to pass before merging", search for and enable:
+#   • Build
+#   • Unit Tests
+#   • Integration Tests — SQL Server (Testcontainers)
+#
+# These names match the `name:` field of each job below. All three must be
+# green before GitHub will allow a merge. If any job is red — build failure,
+# test failure, or coverage below 70% — the merge button is blocked.
+#
+# HOW CI BLOCKS BAD BUILDS
+#   1. `build` compiles both test projects in Release. A compilation error here
+#      cancels `unit-tests` and `integration-tests` immediately (via `needs:`),
+#      so no time is wasted pulling the Docker image on a broken build.
+#   2. `unit-tests` runs domain-model tests with no external dependencies.
+#      Any failing test exits non-zero → job red → merge blocked.
+#   3. `integration-tests` runs the full HTTP stack against a real SQL Server
+#      2022 container. `--settings coverlet.runsettings` enforces a 70% line
+#      coverage floor; coverlet exits non-zero if coverage falls below it,
+#      failing the job before the artifact upload even runs.
+#
+# COVERAGE REPORTS
+#   Both jobs generate HTML + badge + text-summary reports via ReportGenerator
+#   and upload them as workflow artifacts (retained 30 days). The text summary
+#   is also printed directly to the CI log so you can read it without
+#   downloading the artifact. Migrations are excluded from coverage measurement.
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # Triggers on every push to every branch and on PRs targeting main.
 # workflow_dispatch allows a manual run from the Actions tab.
 on:
@@ -108,6 +141,9 @@ jobs:
             --no-restore \
             -c Release
 
+      - name: Install ReportGenerator
+        run: dotnet tool update -g dotnet-reportgenerator-globaltool
+
       - name: Test
         run: |
           dotnet test Tests.Domain/Tests.Domain.csproj \
@@ -116,6 +152,15 @@ jobs:
             --logger "trx;LogFileName=unit.trx" \
             --collect:"XPlat Code Coverage" \
             --results-directory "${{ github.workspace }}/test-results/unit"
+
+      - name: Generate coverage report
+        if: always()
+        run: |
+          reportgenerator \
+            -reports:"${{ github.workspace }}/test-results/unit/**/coverage.cobertura.xml" \
+            -targetdir:"${{ github.workspace }}/test-results/unit/coverage-report" \
+            -reporttypes:"Html;Badges;TextSummary"
+          cat "${{ github.workspace }}/test-results/unit/coverage-report/Summary.txt"
 
       - name: Upload test results and coverage
         if: always()
@@ -182,6 +227,9 @@ jobs:
       - name: Pre-pull SQL Server 2022 image
         run: docker pull mcr.microsoft.com/mssql/server:2022-latest
 
+      - name: Install ReportGenerator
+        run: dotnet tool update -g dotnet-reportgenerator-globaltool
+
       - name: Test
         run: |
           dotnet test Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
@@ -189,6 +237,7 @@ jobs:
             -c Release \
             --logger "trx;LogFileName=integration.trx" \
             --collect:"XPlat Code Coverage" \
+            --settings coverlet.runsettings \
             --results-directory "${{ github.workspace }}/test-results/integration" \
             --blame-hang-timeout 10m \
             --blame-crash
@@ -197,6 +246,15 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
           # Ryuk (Testcontainers resource reaper) is intentionally left enabled.
           # It cleans up containers/networks/volumes on early cancellation.
+
+      - name: Generate coverage report
+        if: always()
+        run: |
+          reportgenerator \
+            -reports:"${{ github.workspace }}/test-results/integration/**/coverage.cobertura.xml" \
+            -targetdir:"${{ github.workspace }}/test-results/integration/coverage-report" \
+            -reporttypes:"Html;Badges;TextSummary"
+          cat "${{ github.workspace }}/test-results/integration/coverage-report/Summary.txt"
 
       # Always upload so failures are diagnosable even when the job is red.
       - name: Upload test results and coverage
