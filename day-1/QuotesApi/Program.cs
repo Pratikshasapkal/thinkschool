@@ -12,6 +12,7 @@ using QuotesApi.Middleware;
 using QuotesApi.Models;
 using QuotesApi.Repositories;
 using QuotesApi.Services;
+using QuotesApi.Telemetry;
 using QuotesApi.Utilities;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -226,12 +227,13 @@ builder.Services.AddOpenTelemetry()
         serviceName: builder.Configuration["OpenTelemetry:ServiceName"] ?? "QuotesApi",
         serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0"))
     .WithTracing(tracing => tracing
+        .AddSource(AppActivitySource.Name)          // custom business spans
         .AddAspNetCoreInstrumentation(opts =>
         {
             opts.RecordException = true;
         })
-        .AddEntityFrameworkCoreInstrumentation()
-        .AddHttpClientInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation()    // child span per EF query
+        .AddHttpClientInstrumentation()             // child span for Entra calls
         .AddOtlpExporter());
 
 
@@ -357,7 +359,13 @@ app.MapPost("/api/quotes", async (
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
     var userEmail = httpContext.User.FindFirstValue(ClaimTypes.Email) ?? string.Empty;
+
+    using var activity = AppActivitySource.Instance.StartActivity("quote.create");
+    activity?.SetTag("user.id", userId);
+    activity?.SetTag("quote.author", request.Author);
+
     var result = Quote.Create(request.Author, request.Text, userEmail);
 
     if (!result.IsSuccess)
@@ -366,12 +374,14 @@ app.MapPost("/api/quotes", async (
             "Quote validation failed UserEmail={UserEmail} Error={ValidationError}",
             userEmail, result.Error);
 
+        activity?.SetStatus(ActivityStatusCode.Error, result.Error);
         return Results.Problem(detail: result.Error, statusCode: 400);
     }
 
     db.Quotes.Add(result.Value!);
     await db.SaveChangesAsync(cancellationToken);
 
+    activity?.SetTag("quote.id", result.Value!.Id);
     quotesLog.LogInformation(
         "Quote created QuoteId={QuoteId} Author={Author} CreatedBy={UserEmail}",
         result.Value!.Id, result.Value.Author, userEmail);
@@ -390,6 +400,11 @@ app.MapGet("/api/quotes", async (
 {
     var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
+    using var activity = AppActivitySource.Instance.StartActivity("quotes.list");
+    activity?.SetTag("user.id", userId);
+    activity?.SetTag("page", page);
+    activity?.SetTag("page.size", size);
+
     quotesLog.LogInformation(
         "Listing quotes UserId={UserId} Page={Page} Size={Size}", userId, page, size);
 
@@ -400,6 +415,7 @@ app.MapGet("/api/quotes", async (
         .Take(size)
         .ToListAsync(cancellationToken);
 
+    activity?.SetTag("result.count", quotes.Count);
     quotesLog.LogInformation(
         "Returning {QuoteCount} quotes UserId={UserId} Page={Page}", quotes.Count, userId, page);
 
@@ -430,6 +446,12 @@ app.MapDelete("/api/quotes/{id}", async (
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    using var activity = AppActivitySource.Instance.StartActivity("quote.delete");
+    activity?.SetTag("quote.id", id);
+    activity?.SetTag("user.id", userId);
+
     var quote = await db.Quotes
         .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted, cancellationToken);
 
@@ -441,10 +463,12 @@ app.MapDelete("/api/quotes/{id}", async (
 
     if (!authResult.Succeeded)
     {
+        activity?.SetTag("authz.result", "denied");
         metrics.RecordAuthorizationFailure("quote");
         return Results.Forbid();
     }
 
+    activity?.SetTag("authz.result", "allowed");
     var userEmail = httpContext.User.FindFirstValue(ClaimTypes.Email) ?? string.Empty;
     quote.Delete();
     await db.SaveChangesAsync(cancellationToken);
@@ -561,6 +585,8 @@ app.MapPost("/api/auth/login", async (
     IConfiguration configuration,
     CancellationToken cancellationToken) =>
 {
+    using var activity = AppActivitySource.Instance.StartActivity("auth.login");
+
     var user = await db.Users
         .FirstOrDefaultAsync(x => x.Email == request.Email, cancellationToken);
 
@@ -570,6 +596,7 @@ app.MapPost("/api/auth/login", async (
         // same log, same response — prevents account enumeration.
         authLog.LogWarning("Login failed Email={Email}", request.Email);
         metrics.RecordLogin("failed");
+        activity?.SetTag("auth.result", "failed");
         return Results.Unauthorized();
     }
 
@@ -591,6 +618,8 @@ app.MapPost("/api/auth/login", async (
         "Login succeeded UserId={UserId} FamilyId={FamilyId}",
         user.Id, familyId);
     metrics.RecordLogin("success");
+    activity?.SetTag("auth.result", "success");
+    activity?.SetTag("user.id", user.Id);
 
     return Results.Ok(new
     {
@@ -606,6 +635,8 @@ app.MapPost("/api/auth/refresh", async (
     IConfiguration configuration,
     CancellationToken cancellationToken) =>
 {
+    using var activity = AppActivitySource.Instance.StartActivity("token.rotate");
+
     var tokenHash = HashToken(request.RefreshToken);
 
     var stored = await db.RefreshTokens
@@ -616,8 +647,12 @@ app.MapPost("/api/auth/refresh", async (
     {
         authLog.LogWarning("Refresh token not found");
         metrics.RecordTokenRefresh("not_found");
+        activity?.SetTag("result", "not_found");
         return Results.Unauthorized();
     }
+
+    activity?.SetTag("user.id", stored.UserId);
+    activity?.SetTag("token.family_id", stored.FamilyId);
 
     if (stored.IsExpired)
     {
@@ -625,6 +660,7 @@ app.MapPost("/api/auth/refresh", async (
             "Refresh token expired UserId={UserId} FamilyId={FamilyId}",
             stored.UserId, stored.FamilyId);
         metrics.RecordTokenRefresh("expired");
+        activity?.SetTag("result", "expired");
         return Results.Unauthorized();
     }
 
@@ -634,6 +670,7 @@ app.MapPost("/api/auth/refresh", async (
             "Refresh token reuse detected — revoking family UserId={UserId} FamilyId={FamilyId}",
             stored.UserId, stored.FamilyId);
         metrics.RecordTokenRefresh("reuse_detected");
+        activity?.SetTag("result", "reuse_detected");
         await RevokeFamily(db, stored.FamilyId, cancellationToken);
         return Results.Unauthorized();
     }
@@ -644,6 +681,7 @@ app.MapPost("/api/auth/refresh", async (
             "Refresh token already revoked UserId={UserId} FamilyId={FamilyId}",
             stored.UserId, stored.FamilyId);
         metrics.RecordTokenRefresh("revoked");
+        activity?.SetTag("result", "revoked");
         return Results.Unauthorized();
     }
 
@@ -667,6 +705,7 @@ app.MapPost("/api/auth/refresh", async (
         "Token rotated UserId={UserId} FamilyId={FamilyId}",
         stored.UserId, stored.FamilyId);
     metrics.RecordTokenRefresh("rotated");
+    activity?.SetTag("result", "rotated");
 
     return Results.Ok(new
     {
