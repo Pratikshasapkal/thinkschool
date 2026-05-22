@@ -89,6 +89,17 @@ builder.Services
 
         options.Events = new JwtBearerEvents
         {
+            OnTokenValidated = ctx =>
+            {
+                var log = ctx.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>().CreateLogger("QuotesApi.Auth");
+
+                var userId = ctx.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                log.LogInformation("Token validated UserId={UserId}", userId);
+
+                return Task.CompletedTask;
+            },
+
             OnAuthenticationFailed = ctx =>
             {
                 var svc = ctx.HttpContext.RequestServices;
@@ -107,6 +118,25 @@ builder.Services
                         ctx.Exception.GetType().Name,
                         ctx.HttpContext.Request.Path.Value);
                     metrics.RecordJwtFailure("bearer", "invalid");
+                }
+
+                return Task.CompletedTask;
+            },
+
+            // Fires when JwtBearer is asked to issue a 401 challenge.
+            // AuthenticateFailure is non-null when a token was present but invalid —
+            // OnAuthenticationFailed already logged that case, so we only log here
+            // for the "no token provided at all" path to avoid duplicate lines.
+            OnChallenge = ctx =>
+            {
+                if (ctx.AuthenticateFailure is null)
+                {
+                    var log = ctx.HttpContext.RequestServices
+                        .GetRequiredService<ILoggerFactory>().CreateLogger("QuotesApi.Auth");
+
+                    log.LogWarning(
+                        "No bearer token in request Path={Path}",
+                        ctx.HttpContext.Request.Path.Value);
                 }
 
                 return Task.CompletedTask;
@@ -161,6 +191,7 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddScoped<IAuthorizationHandler, DeleteOwnQuoteHandler>();
+builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, LoggingAuthorizationResultHandler>();
 
 builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
 {
@@ -323,16 +354,25 @@ app.MapPost("/api/quotes", async (
 
 app.MapGet("/api/quotes", async (
     AppDbContext db,
+    HttpContext httpContext,
     CancellationToken cancellationToken,
     int page = 1,
     int size = 10) =>
 {
+    var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    quotesLog.LogInformation(
+        "Listing quotes UserId={UserId} Page={Page} Size={Size}", userId, page, size);
+
     var quotes = await db.Quotes
         .Where(q => !q.IsDeleted)
         .OrderBy(q => q.Id)
         .Skip((page - 1) * size)
         .Take(size)
         .ToListAsync(cancellationToken);
+
+    quotesLog.LogInformation(
+        "Returning {QuoteCount} quotes UserId={UserId} Page={Page}", quotes.Count, userId, page);
 
     return Results.Ok(quotes);
 }).RequireAuthorization();
