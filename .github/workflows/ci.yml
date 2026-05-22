@@ -1,40 +1,10 @@
 name: Quotes API — CI
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# BRANCH PROTECTION — REQUIRED STATUS CHECKS
-#
-# To enforce this workflow before merging into main, go to:
-#   GitHub → Settings → Branches → Add branch protection rule → "main"
-#
-# Under "Require status checks to pass before merging", search for and enable:
-#   • Build
-#   • Unit Tests
-#   • Integration Tests — SQL Server (Testcontainers)
-#
-# These names match the `name:` field of each job below. All three must be
-# green before GitHub will allow a merge. If any job is red — build failure,
-# test failure, or coverage below 70% — the merge button is blocked.
-#
-# HOW CI BLOCKS BAD BUILDS
-#   1. `build` compiles both test projects in Release. A compilation error here
-#      cancels `unit-tests` and `integration-tests` immediately (via `needs:`),
-#      so no time is wasted pulling the Docker image on a broken build.
-#   2. `unit-tests` runs domain-model tests with no external dependencies.
-#      Any failing test exits non-zero → job red → merge blocked.
-#   3. `integration-tests` runs the full HTTP stack against a real SQL Server
-#      2022 container. `--settings coverlet.runsettings` enforces a 70% line
-#      coverage floor; coverlet exits non-zero if coverage falls below it,
-#      failing the job before the artifact upload even runs.
-#
-# COVERAGE REPORTS
-#   Both jobs generate HTML + badge + text-summary reports via ReportGenerator
-#   and upload them as workflow artifacts (retained 30 days). The text summary
-#   is also printed directly to the CI log so you can read it without
-#   downloading the artifact. Migrations are excluded from coverage measurement.
-# ═══════════════════════════════════════════════════════════════════════════════
+# Branch protection — required status checks for main:
+#   Build | Unit Tests | Integration Tests — SQL Server (Testcontainers)
+# Settings → Branches → Add rule → "main" → Require status checks to pass.
+# Coverage below 70% (integration tests) also fails CI via coverlet.runsettings.
 
-# Triggers on every push to every branch and on PRs targeting main.
-# workflow_dispatch allows a manual run from the Actions tab.
 on:
   push:
     branches:
@@ -44,8 +14,6 @@ on:
       - main
   workflow_dispatch:
 
-# Cancel any in-flight run for the same workflow+ref when a new commit arrives.
-# This prevents queuing up stale runs on rapid pushes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -56,13 +24,7 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
-  # ───────────────────────────────────────────────────────────────────────────
-  # Job 1 — fast build gate
-  #
-  # Compiles every test project (which transitively compiles QuotesApi).
-  # Failing here blocks both downstream test jobs immediately, avoiding
-  # a wasted Docker-pull on a broken build.
-  # ───────────────────────────────────────────────────────────────────────────
+  # Fast build gate — compilation failure cancels both test jobs immediately.
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -94,19 +56,10 @@ jobs:
 
       - name: Build
         run: |
-          dotnet build Tests.Domain/Tests.Domain.csproj \
-            --no-restore \
-            -c Release
-          dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
-            --no-restore \
-            -c Release
+          dotnet build Tests.Domain/Tests.Domain.csproj --no-restore -c Release
+          dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj --no-restore -c Release
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # Job 2 — unit tests (no Docker, fast)
-  #
-  # Tests.Domain covers domain-model logic for Quote, Collection, and
-  # RefreshToken in pure isolation — no database, no HTTP stack.
-  # ───────────────────────────────────────────────────────────────────────────
+  # Domain-model unit tests — no Docker, no database.
   unit-tests:
     name: Unit Tests
     needs: build
@@ -136,10 +89,7 @@ jobs:
         run: dotnet restore Tests.Domain/Tests.Domain.csproj
 
       - name: Build
-        run: |
-          dotnet build Tests.Domain/Tests.Domain.csproj \
-            --no-restore \
-            -c Release
+        run: dotnet build Tests.Domain/Tests.Domain.csproj --no-restore -c Release
 
       - name: Install ReportGenerator
         run: dotnet tool update -g dotnet-reportgenerator-globaltool
@@ -147,8 +97,7 @@ jobs:
       - name: Test
         run: |
           dotnet test Tests.Domain/Tests.Domain.csproj \
-            --no-build \
-            -c Release \
+            --no-build -c Release \
             --logger "trx;LogFileName=unit.trx" \
             --collect:"XPlat Code Coverage" \
             --results-directory "${{ github.workspace }}/test-results/unit"
@@ -170,26 +119,12 @@ jobs:
           path: ${{ github.workspace }}/test-results/unit/
           retention-days: 30
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # Job 3 — SQL Server integration tests via Testcontainers
-  #
-  # How it works:
-  #   - ubuntu-latest runners ship with Docker Engine pre-installed.
-  #   - SqlServerContainerFixture starts ONE mcr.microsoft.com/mssql/server:2022-latest
-  #     container via the xUnit [CollectionDefinition] fixture.
-  #   - All test classes share [Collection("SqlServer")], so xUnit serialises them
-  #     and the container is started once and stopped once per run.
-  #   - Each CustomWebApplicationFactory creates a GUID-named database, runs all
-  #     EF Core migrations (Migrate()), seeds one admin user, then discards it
-  #     (the container is destroyed when the job finishes anyway).
-  #   - Zero shared state: each [Fact] gets a fresh factory → fresh database.
-  # ───────────────────────────────────────────────────────────────────────────
+  # Full HTTP stack against a real SQL Server 2022 container (Testcontainers).
+  # coverlet.runsettings enforces 70% line coverage — fails CI if below threshold.
   integration-tests:
     name: Integration Tests — SQL Server (Testcontainers)
     needs: build
     runs-on: ubuntu-latest
-    # 30-minute ceiling: image pull (~1 min) + build (~1 min) + 48 migration
-    # runs + test execution.  Increase only if the suite grows significantly.
     timeout-minutes: 30
 
     defaults:
@@ -216,14 +151,8 @@ jobs:
         run: dotnet restore Quotes.Tests.Integration/Quotes.Tests.Integration.csproj
 
       - name: Build
-        run: |
-          dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
-            --no-restore \
-            -c Release
+        run: dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj --no-restore -c Release
 
-      # Separate image pull from test execution so the CI timeline clearly shows
-      # download time vs. actual test time.  Also prevents Testcontainers from
-      # timing out on the first test if the pull is slow on a cold runner.
       - name: Pre-pull SQL Server 2022 image
         run: docker pull mcr.microsoft.com/mssql/server:2022-latest
 
@@ -233,8 +162,7 @@ jobs:
       - name: Test
         run: |
           dotnet test Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
-            --no-build \
-            -c Release \
+            --no-build -c Release \
             --logger "trx;LogFileName=integration.trx" \
             --collect:"XPlat Code Coverage" \
             --settings coverlet.runsettings \
@@ -242,10 +170,7 @@ jobs:
             --blame-hang-timeout 10m \
             --blame-crash
         env:
-          # Explicit socket path removes ambiguity if the runner layout ever changes.
           DOCKER_HOST: unix:///var/run/docker.sock
-          # Ryuk (Testcontainers resource reaper) is intentionally left enabled.
-          # It cleans up containers/networks/volumes on early cancellation.
 
       - name: Generate coverage report
         if: always()
@@ -256,7 +181,6 @@ jobs:
             -reporttypes:"Html;Badges;TextSummary"
           cat "${{ github.workspace }}/test-results/integration/coverage-report/Summary.txt"
 
-      # Always upload so failures are diagnosable even when the job is red.
       - name: Upload test results and coverage
         if: always()
         uses: actions/upload-artifact@v4
