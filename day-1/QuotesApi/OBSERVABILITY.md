@@ -211,4 +211,7 @@ No code change is needed — `AddOtlpExporter()` reads the env var automatically
 
 ## Commit Hash
 
-`80e1dcc` — feat: add custom OTel spans for business operations
+| Commit | Description |
+|---|---|
+| `80e1dcc` | feat: add custom OTel spans for business operations |
+| `15e78af` | docs: add observability documentation and expand OTel inline comments |
