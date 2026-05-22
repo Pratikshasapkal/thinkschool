@@ -211,8 +211,20 @@ builder.Services.AddSingleton<ApiMetrics>();
 
 // OpenTelemetry distributed tracing.
 //
-// Every incoming HTTP request becomes a root span; EF Core queries and outbound
-// HTTP calls (Entra token validation) become child spans automatically.
+// Logs vs traces:
+//   Logs (Serilog) record discrete events — "Quote created QuoteId=7".
+//   Traces record causally-linked spans with start/end timing and a parent–child
+//   hierarchy that shows the full call tree for a single request.
+//   Both are correlated via the same 32-char W3C TraceId.
+//
+// Automatic instrumentation — zero application code:
+//   AddAspNetCoreInstrumentation → one root span per HTTP request
+//   AddEntityFrameworkCoreInstrumentation → one child span per EF query
+//   AddHttpClientInstrumentation → one child span per outbound HTTP call (Entra OIDC)
+//
+// Custom instrumentation — AppActivitySource spans in endpoint handlers:
+//   Business operations the frameworks can't observe (quote.create, token.rotate, …).
+//   Each StartActivity() call creates a child of Activity.Current (the request span).
 //
 // Serilog TraceId alignment:
 //   CorrelationIdMiddleware reads Activity.Current.TraceId, so every log line
@@ -362,6 +374,9 @@ app.MapPost("/api/quotes", async (
     var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
     var userEmail = httpContext.User.FindFirstValue(ClaimTypes.Email) ?? string.Empty;
 
+    // StartActivity returns null when no collector is listening — ?. makes every
+    // tag call a no-op so there is zero overhead when tracing is disabled.
+    // The using block records the span end time when the handler returns.
     using var activity = AppActivitySource.Instance.StartActivity("quote.create");
     activity?.SetTag("user.id", userId);
     activity?.SetTag("quote.author", request.Author);
