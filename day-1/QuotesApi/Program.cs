@@ -69,7 +69,6 @@ builder.Services
                     ValidateAudience = true,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    ClockSkew = TimeSpan.Zero,
 
                     ValidIssuer =
                         configuration["Jwt:Issuer"],
@@ -107,14 +106,11 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("can-edit-quotes", policy =>
         policy.RequireClaim("scope", "quotes.write"));
-
-    options.AddPolicy("can-delete-own-quotes", policy =>
-        policy.AddRequirements(new DeleteOwnQuoteRequirement()));
 });
 
 builder.Services.AddScoped<IAuthorizationHandler, DeleteOwnQuoteHandler>();
 
-builder.Services.AddDbContext<AppDbContext>(options =>
+builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
 {
     options.UseSqlite("Data Source=quotes.db");
 });
@@ -264,7 +260,7 @@ app.MapDelete("/api/quotes/{id}", async (
         return Results.NotFound();
 
     var authResult = await authService.AuthorizeAsync(
-        httpContext.User, quote, "can-delete-own-quotes");
+        httpContext.User, quote, new DeleteOwnQuoteRequirement());
 
     if (!authResult.Succeeded)
         return Results.Forbid();
@@ -293,14 +289,12 @@ app.MapGet("/api/collections/{id}", async (
 app.MapPost("/api/collections", async (
     string name,
     int ownerId,
-    IClock clock,
     ICollectionRepository repository,
     CancellationToken cancellationToken) =>
 {
     var collection = new Collection(
         name,
-        ownerId,
-        clock);
+        ownerId);
 
     await repository.Add(
         collection,
@@ -315,6 +309,7 @@ app.MapPost("/api/collections/{id}/items", async (
     int id,
     int quoteId,
     ICollectionRepository repository,
+    IClock clock,
     CancellationToken cancellationToken) =>
 {
     var collection = await repository.GetById(
@@ -328,7 +323,7 @@ app.MapPost("/api/collections/{id}/items", async (
 
     try
     {
-        collection.AddItem(quoteId);
+        collection.AddItem(quoteId, clock);
     }
     catch (InvalidOperationException ex)
     {
@@ -464,8 +459,10 @@ app.MapPost("/api/auth/refresh", async (
 
 
 
-using (var scope = app.Services.CreateScope())
+if (!app.Environment.IsEnvironment("Testing"))
 {
+    using var scope = app.Services.CreateScope();
+
     var db = scope.ServiceProvider
         .GetRequiredService<AppDbContext>();
 
@@ -482,5 +479,3 @@ using (var scope = app.Services.CreateScope())
 
 
 app.Run();
-
-public partial class Program { }

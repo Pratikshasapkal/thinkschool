@@ -1,0 +1,146 @@
+name: Quotes API — CI
+
+# Triggers on any push or PR that touches day-1 source or this workflow file.
+# workflow_dispatch lets us kick off a run manually from the Actions tab.
+on:
+  push:
+    paths:
+      - 'day-1/**'
+      - '.github/workflows/integration-tests.yml'
+  pull_request:
+    paths:
+      - 'day-1/**'
+      - '.github/workflows/integration-tests.yml'
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same branch when a new commit arrives,
+# so we never queue up stale integration runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1 — pure unit tests (no Docker, fast)
+  # ─────────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: day-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('day-1/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Quotes.Tests.Unit/Quotes.Tests.Unit.csproj
+
+      - name: Build
+        run: dotnet build Quotes.Tests.Unit/Quotes.Tests.Unit.csproj --no-restore -c Release
+
+      - name: Test
+        run: |
+          dotnet test Quotes.Tests.Unit/Quotes.Tests.Unit.csproj \
+            --no-build \
+            -c Release \
+            --logger "console;verbosity=normal"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2 — SQL Server integration tests via Testcontainers
+  #
+  # How it works:
+  #   - ubuntu-latest runners ship with Docker Engine pre-installed.
+  #   - SqlServerContainerFixture starts ONE mcr.microsoft.com/mssql/server:2022-latest
+  #     container via the xUnit [CollectionDefinition] fixture.
+  #   - All test classes share [Collection("SqlServer")], so xUnit serialises them
+  #     and the container is started once, stopped once.
+  #   - Each CustomWebApplicationFactory instance creates a GUID-named database,
+  #     runs all EF Core migrations (Migrate()), seeds one admin user, then drops
+  #     nothing (the container is destroyed at the end of the run anyway).
+  #   - Zero shared state between tests: each [Fact] gets a fresh factory → fresh DB.
+  # ─────────────────────────────────────────────────────────────────────────────
+  integration-tests:
+    name: Integration Tests — SQL Server (Testcontainers)
+    runs-on: ubuntu-latest
+    # 30-minute ceiling: image pull (~1 min) + build + N migration runs + all tests
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: day-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('day-1/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Quotes.Tests.Integration/Quotes.Tests.Integration.csproj
+
+      - name: Build
+        run: dotnet build Quotes.Tests.Integration/Quotes.Tests.Integration.csproj --no-restore
+
+      # Pull the image before the test run so that image-download time is
+      # separated from test-execution time in the CI timeline.
+      # This also makes the first test's container startup deterministic —
+      # Testcontainers won't time out waiting for a slow pull.
+      - name: Pre-pull SQL Server 2022 image
+        run: docker pull mcr.microsoft.com/mssql/server:2022-latest
+
+      - name: Run integration tests
+        run: |
+          dotnet test Quotes.Tests.Integration/Quotes.Tests.Integration.csproj \
+            --no-build \
+            --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=integration.trx" \
+            --results-directory "${{ github.workspace }}/test-results" \
+            --blame-hang-timeout 10m \
+            --blame-crash
+        env:
+          # Testcontainers auto-detects /var/run/docker.sock on Ubuntu, but
+          # being explicit avoids ambiguity if the runner layout ever changes.
+          DOCKER_HOST: unix:///var/run/docker.sock
+          # Ryuk (the Testcontainers resource reaper) is left enabled (default).
+          # It cleans up any containers/networks/volumes that the test process
+          # did not explicitly remove — important if the run is cancelled early.
+          # Set TESTCONTAINERS_RYUK_DISABLED=true only if the runner lacks the
+          # socket permissions that Ryuk needs.
+
+      # Always upload the TRX report so failures are diagnosable even when
+      # the job itself is marked red.
+      - name: Upload test results (TRX)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results-${{ github.run_number }}
+          path: ${{ github.workspace }}/test-results/integration.trx
+          retention-days: 14
