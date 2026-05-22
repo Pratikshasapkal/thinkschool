@@ -1,11 +1,11 @@
 using System.Net;
-using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuotesApi.Data;
-using QuotesApi.Tests.Fakes;
+
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace QuotesApi.Tests;
 
@@ -19,29 +19,24 @@ public class CancellationTests : IClassFixture<WebApplicationFactory<Program>>
         {
             builder.ConfigureServices(services =>
             {
-                // Keep SQLite as the provider (avoids the InMemory + SQLite conflict).
-                // Use a single open in-memory connection so all DbContext instances
-                // in this server share the same data. EnsureCreated is called here,
-                // before Program.cs's seeding block runs, so the tables exist.
-                var connection = new SqliteConnection("Data Source=:memory:");
-                connection.Open();
+                builder.UseEnvironment("Testing");
+                // Replace SQLite with an isolated in-memory database so tests
+                // don't touch the file system and don't share state.
+                var descriptors = services
+                    .Where(d =>
+                        d.ServiceType == typeof(DbContextOptions<AppDbContext>) ||
+                        d.ServiceType == typeof(AppDbContext) ||
+                        (d.ServiceType.IsGenericType &&
+                         d.ServiceType.GetGenericArguments().Contains(typeof(AppDbContext))))
+                    .ToList();
 
-                var descriptor = services.SingleOrDefault(
-                    d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-                if (descriptor is not null) services.Remove(descriptor);
+                foreach (var descriptor in descriptors)
+                {
+                    services.Remove(descriptor);
+                }
 
                 services.AddDbContext<AppDbContext>(options =>
-                    options.UseSqlite(connection));
-
-                var optBuilder = new DbContextOptionsBuilder<AppDbContext>();
-                optBuilder.UseSqlite(connection);
-                using var ctx = new AppDbContext(optBuilder.Options);
-                ctx.Database.EnsureCreated();
-
-                // Bypass real JWT validation so these cancellation-focused tests
-                // don't need to manage tokens.
-                services.AddAuthentication("Test")
-                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
+                    options.UseInMemoryDatabase("CancellationTests_" + Guid.NewGuid()));
             });
         });
     }
