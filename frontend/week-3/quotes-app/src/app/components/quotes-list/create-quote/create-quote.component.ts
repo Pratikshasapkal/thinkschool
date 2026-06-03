@@ -1,44 +1,63 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  ElementRef,
   inject,
   output,
   signal,
-  ViewChild,
 } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
+import {
+  form,
+  FormField,
+  FormRoot,
+  maxLength,
+  required,
+} from '@angular/forms/signals';
 import { QuotesService } from '../../../services/quotes.service';
 
 /**
- * Design decisions
- * ────────────────
- * wasSubmitted signal — avoids calling markAllAsTouched() which does not
- *   schedule change detection in zoneless + OnPush.  Setting a signal on the
- *   first invalid submit triggers a re-render that shows all errors at once.
+ * Design decisions — Signal Forms edition
+ * ─────────────────────────────────────────
+ * @angular/forms/signals is EXPERIMENTAL in Angular 21. The API may change.
  *
- * isInvalid() / hasError() as methods — reactive because Angular's
- *   FormControlDirective calls ChangeDetectorRef.markForCheck() whenever a
- *   bound control's value or status changes, so each re-render reads the
- *   latest FormControl state.
+ * form() + [formRoot] replace FormBuilder + ReactiveFormsModule.
+ *   [formRoot] marks all fields as touched on submit, validates, and only
+ *   calls the action if the form is valid — no manual wasSubmitted signal
+ *   or markAllAsTouched() call required.
  *
- * @ViewChild for focus — focus is moved to the first invalid field on submit
- *   so keyboard and screen-reader users know exactly where to look.
+ * submission.action replaces the subscribe({ next, error }) block.
+ *   Returning { kind, message } surfaces the error through quoteForm().errors().
+ *   Returning nothing (undefined) signals success.
+ *
+ * model signal is the source of truth. Resetting it clears field values.
+ *   KNOWN LIMITATION: Signal Forms (experimental) has no reset() API for
+ *   touched/dirty metadata. After model.set({…}), fields are empty but
+ *   still touched, so Required errors flash briefly. The succeeded banner
+ *   draws attention away from this. A stable reset API is expected once
+ *   Signal Forms graduates from experimental.
+ *
+ * aria-invalid / aria-describedby are wired manually — [formField] handles
+ *   value sync and name attributes but does NOT apply ARIA attributes.
+ *
+ * No @ViewChild focus management — Signal Forms does not provide
+ *   focusFirstInvalid() behaviour. This is a missing feature vs Reactive Forms.
  *
  * output<void>() — modern Angular signals-based outputs, no EventEmitter.
  *
- * fb.nonNullable.group() — control values typed as string (not string|null),
- *   so getRawValue() returns { author: string; text: string } without cast.
- *
- * aria-describedby targets — the error <p> elements are always present in the
- *   DOM (never wrapped in @if) so the describedby association is never broken.
- *   aria-live="polite" on each announces content changes to screen readers.
+ * Character counters read this.model() directly (the source of truth signal)
+ *   rather than going through the FieldTree, which avoids a circular call chain.
  */
+
+interface QuoteFormModel {
+  author: string;
+  text: string;
+}
+
 @Component({
   selector: 'app-create-quote',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [FormField, FormRoot],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="panel" role="region" aria-labelledby="cq-title">
@@ -63,21 +82,30 @@ import { QuotesService } from '../../../services/quotes.service';
       }
 
       <!-- Server-error banner -->
-      @if (serverError()) {
+      @let serverErr = serverError();
+      @if (serverErr) {
         <div class="banner banner-error" role="alert">
-          {{ serverError() }}
+          {{ serverErr }}
         </div>
       }
 
+      <!--
+        [formRoot] wires the form to Signal Forms:
+          - intercepts the native submit event
+          - marks all fields as touched (showing all errors at once)
+          - validates; calls the action ONLY if the form is valid
+        novalidate suppresses the browser's own validation UI.
+      -->
       <form
-        [formGroup]="form"
-        (ngSubmit)="onSubmit()"
+        [formRoot]="quoteForm"
         novalidate
         aria-label="Create quote"
       >
 
         <!-- ── Author ── -->
-        <div class="field" [class.field-error-active]="isInvalid('author')">
+        @let authorState = quoteForm.author();
+        @let authorInvalid = authorState.invalid() && authorState.touched();
+        <div class="field" [class.field-error-active]="authorInvalid">
           <label for="cq-author" class="field-label">
             Author
             <span class="required-mark" aria-hidden="true">*</span>
@@ -85,35 +113,34 @@ import { QuotesService } from '../../../services/quotes.service';
 
           <input
             id="cq-author"
-            #authorInput
             type="text"
-            formControlName="author"
+            [formField]="quoteForm.author"
             class="field-input"
             autocomplete="off"
-            [attr.aria-invalid]="isInvalid('author') ? 'true' : 'false'"
+            [attr.aria-invalid]="authorInvalid ? 'true' : 'false'"
             aria-describedby="cq-author-err cq-author-hint"
           />
 
           <div class="field-foot">
-            <!-- Error message is always in the DOM so aria-describedby is stable -->
+            <!-- Always in DOM so aria-describedby association is never broken -->
             <p id="cq-author-err" class="field-err-msg" aria-live="polite">
-              @if (hasError('author', 'required')) {
-                Author is required.
-              } @else if (hasError('author', 'maxlength')) {
-                Author cannot exceed 200 characters.
+              @if (authorInvalid) {
+                {{ authorState.errors().at(0)?.message }}
               }
             </p>
             <span
               id="cq-author-hint"
               class="char-count"
-              [class.char-count-warn]="authorLength() > 180"
+              [class.char-count-warn]="model().author.length > 180"
               aria-hidden="true"
-            >{{ authorLength() }}&thinsp;/&thinsp;200</span>
+            >{{ model().author.length }}&thinsp;/&thinsp;200</span>
           </div>
         </div>
 
         <!-- ── Quote text ── -->
-        <div class="field" [class.field-error-active]="isInvalid('text')">
+        @let textState = quoteForm.text();
+        @let textInvalid = textState.invalid() && textState.touched();
+        <div class="field" [class.field-error-active]="textInvalid">
           <label for="cq-text" class="field-label">
             Quote text
             <span class="required-mark" aria-hidden="true">*</span>
@@ -121,28 +148,25 @@ import { QuotesService } from '../../../services/quotes.service';
 
           <textarea
             id="cq-text"
-            #textInput
-            formControlName="text"
+            [formField]="quoteForm.text"
             class="field-input field-textarea"
             rows="5"
-            [attr.aria-invalid]="isInvalid('text') ? 'true' : 'false'"
+            [attr.aria-invalid]="textInvalid ? 'true' : 'false'"
             aria-describedby="cq-text-err cq-text-hint"
           ></textarea>
 
           <div class="field-foot">
             <p id="cq-text-err" class="field-err-msg" aria-live="polite">
-              @if (hasError('text', 'required')) {
-                Quote text is required.
-              } @else if (hasError('text', 'maxlength')) {
-                Quote text cannot exceed 1000 characters.
+              @if (textInvalid) {
+                {{ textState.errors().at(0)?.message }}
               }
             </p>
             <span
               id="cq-text-hint"
               class="char-count"
-              [class.char-count-warn]="textLength() > 900"
+              [class.char-count-warn]="model().text.length > 900"
               aria-hidden="true"
-            >{{ textLength() }}&thinsp;/&thinsp;1000</span>
+            >{{ model().text.length }}&thinsp;/&thinsp;1000</span>
           </div>
         </div>
 
@@ -156,12 +180,16 @@ import { QuotesService } from '../../../services/quotes.service';
             (click)="onCancel()"
           >Cancel</button>
 
+          <!--
+            quoteForm().submitting() is true while the action is running.
+            [formRoot] sets it automatically — no manual submitting signal needed.
+          -->
           <button
             type="submit"
             class="btn btn-primary"
-            [disabled]="submitting()"
+            [disabled]="quoteForm().submitting()"
           >
-            @if (submitting()) {
+            @if (quoteForm().submitting()) {
               <span class="btn-spinner" aria-hidden="true"></span>
               Creating…
             } @else {
@@ -254,7 +282,6 @@ import { QuotesService } from '../../../services/quotes.service';
       line-height: 1.6;
     }
 
-    /* Red border when the field has an active error */
     .field-error-active .field-input {
       border-color: #ff4d4f;
     }
@@ -269,7 +296,7 @@ import { QuotesService } from '../../../services/quotes.service';
       justify-content: space-between;
       align-items: baseline;
       gap: .5rem;
-      min-height: 1.2em; /* reserves space so layout doesn't jump */
+      min-height: 1.2em;
     }
 
     .field-err-msg {
@@ -340,101 +367,77 @@ import { QuotesService } from '../../../services/quotes.service';
 })
 export class CreateQuoteComponent {
   private readonly svc = inject(QuotesService);
-  private readonly fb  = inject(FormBuilder);
 
   // ── Outputs ──────────────────────────────────────────────────────────────
-  /** Emitted after a successful POST; parent should reload the quote list. */
   readonly created   = output<void>();
-  /** Emitted when the user closes the form without submitting. */
   readonly cancelled = output<void>();
 
-  // ── Focus targets for first-invalid-field focus on submit ────────────────
-  @ViewChild('authorInput') private readonly authorInputRef!: ElementRef<HTMLInputElement>;
-  @ViewChild('textInput')   private readonly textInputRef!: ElementRef<HTMLTextAreaElement>;
+  // ── Local state ──────────────────────────────────────────────────────────
+  readonly succeeded = signal(false);
 
-  // ── Reactive form ─────────────────────────────────────────────────────────
-  // nonNullable.group() ensures getRawValue() returns { author: string; text: string }
-  // without a string | null union — keeps downstream code strictly typed.
-  readonly form = this.fb.nonNullable.group({
-    author: ['', [Validators.required, Validators.maxLength(200)]],
-    text:   ['', [Validators.required, Validators.maxLength(1000)]],
-  });
+  // ── Model signal (source of truth for field values) ───────────────────────
+  // form() reads this signal and keeps the FieldTree in sync.
+  // Resetting it resets field values; touched/dirty metadata is NOT reset
+  // (Signal Forms experimental limitation — no reset() API yet).
+  readonly model = signal<QuoteFormModel>({ author: '', text: '' });
 
-  // ── Component signals ─────────────────────────────────────────────────────
-  readonly submitting   = signal(false);
-  readonly serverError  = signal<string | null>(null);
-  readonly succeeded    = signal(false);
-  /**
-   * Flipped to true on the first submit attempt.
-   * Used by isInvalid() so all fields show errors at once on submit,
-   * without calling markAllAsTouched() which doesn't schedule change
-   * detection in zoneless + OnPush.
-   */
-  readonly wasSubmitted = signal(false);
+  // ── Signal Form ───────────────────────────────────────────────────────────
+  // form(model, validationSchema, options)
+  //   model           — writable signal holding form values
+  //   validationSchema — imperative schema; validators run on every value change
+  //   submission.action — called by [formRoot] after all validators pass;
+  //                       return { kind, message } to surface a form-level error,
+  //                       return nothing (undefined) for success
+  readonly quoteForm = form(
+    this.model,
+    (path) => {
+      required(path.author, { message: 'Author is required.' });
+      maxLength(path.author, 200, { message: 'Author cannot exceed 200 characters.' });
+      required(path.text, { message: 'Quote text is required.' });
+      maxLength(path.text, 1000, { message: 'Quote text cannot exceed 1000 characters.' });
+    },
+    {
+      submission: {
+        action: async (field) => {
+          this.succeeded.set(false);
 
-  // ── Validation helpers ────────────────────────────────────────────────────
-  // These are plain methods rather than computed() because they read from
-  // FormControl properties, not signals.  They are called by the template
-  // on every render triggered by either a signal change (wasSubmitted) or
-  // Angular's FormControlDirective calling markForCheck() on value/status
-  // changes — so they always reflect current form state.
+          const { author, text } = field().value();
 
-  isInvalid(field: 'author' | 'text'): boolean {
-    const ctrl = this.form.controls[field];
-    return ctrl.invalid && (ctrl.touched || this.wasSubmitted());
+          try {
+            // POST /api/quotes — body: { "author": string, "text": string }
+            await firstValueFrom(this.svc.createQuote({ author, text }));
+            this.succeeded.set(true);
+            // Reset model values. KNOWN ISSUE: touched metadata is not reset
+            // by Signal Forms (experimental). Empty required fields may briefly
+            // show their validation errors until the user interacts or closes
+            // the panel. A stable reset() API is expected post-experimental.
+            this.model.set({ author: '', text: '' });
+            this.created.emit();
+            return; // explicit success path — action returns nothing on success
+          } catch (err) {
+            const httpErr = err as HttpErrorResponse;
+            const problem = httpErr.error as { detail?: string };
+            // Returning an error object surfaces it through quoteForm().errors()
+            // with kind 'serverError' so the template can display it in the banner.
+            return {
+              kind: 'serverError' as const,
+              message: problem?.detail ?? 'Something went wrong. Please try again.',
+            };
+          }
+        },
+      },
+    },
+  );
+
+  // ── Server-error accessor ─────────────────────────────────────────────────
+  // Reads form-level errors from Signal Forms and finds the action-returned one.
+  serverError(): string {
+    const err = this.quoteForm().errors().find(e => e.kind === 'serverError');
+    return err?.message ?? '';
   }
-
-  hasError(field: 'author' | 'text', error: string): boolean {
-    return this.isInvalid(field) && this.form.controls[field].hasError(error);
-  }
-
-  authorLength(): number { return this.form.controls.author.value.length; }
-  textLength():   number { return this.form.controls.text.value.length; }
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  onSubmit(): void {
-    // Reset transient banners
-    this.succeeded.set(false);
-    this.serverError.set(null);
-
-    if (this.form.invalid) {
-      // Signal flip triggers re-render → all invalid fields show errors
-      this.wasSubmitted.set(true);
-      this.focusFirstInvalid();
-      return;
-    }
-
-    this.submitting.set(true);
-    const { author, text } = this.form.getRawValue();
-
-    this.svc.createQuote({ author, text }).subscribe({
-      next: () => {
-        this.succeeded.set(true);
-        this.submitting.set(false);
-        this.form.reset();
-        this.wasSubmitted.set(false);
-        this.created.emit();        // parent reloads list; form stays open
-      },
-      error: (err: HttpErrorResponse) => {
-        // Backend returns RFC 7807 ProblemDetails: { detail: string, status: number }
-        const problem = err.error as { detail?: string };
-        this.serverError.set(
-          problem?.detail ?? 'Something went wrong. Please try again.',
-        );
-        this.submitting.set(false);
-      },
-    });
-  }
-
   onCancel(): void {
     this.cancelled.emit();
-  }
-
-  private focusFirstInvalid(): void {
-    if (this.form.controls.author.invalid) {
-      this.authorInputRef?.nativeElement.focus();
-    } else if (this.form.controls.text.invalid) {
-      this.textInputRef?.nativeElement.focus();
-    }
   }
 }
