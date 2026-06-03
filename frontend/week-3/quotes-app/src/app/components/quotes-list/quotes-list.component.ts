@@ -11,11 +11,12 @@ import { FormsModule } from '@angular/forms';
 import { QuotesService } from '../../services/quotes.service';
 import { AuthService } from '../../services/auth.service';
 import { Quote } from '../../models/quote.model';
+import { CreateQuoteComponent } from './create-quote/create-quote.component';
 
 @Component({
   selector: 'app-quotes-list',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, CreateQuoteComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="shell">
@@ -49,6 +50,24 @@ import { Quote } from '../../models/quote.model';
           [disabled]="svc.loading()"
           (click)="refresh()"
         >↺</button>
+
+        <button
+          class="btn-new"
+          [class.btn-new-active]="showCreateForm()"
+          [attr.aria-expanded]="showCreateForm()"
+          aria-controls="create-quote-region"
+          (click)="toggleCreateForm()"
+        >{{ showCreateForm() ? '✕ Cancel' : '+ New Quote' }}</button>
+      </div>
+
+      <!-- ── Create Quote form (toggled) ──────────────────────────────────── -->
+      <div id="create-quote-region">
+        @if (showCreateForm()) {
+          <app-create-quote
+            (created)="onQuoteCreated()"
+            (cancelled)="showCreateForm.set(false)"
+          />
+        }
       </div>
 
       <!-- ── Master / Detail grid ─────────────────────────────────────────── -->
@@ -186,6 +205,20 @@ import { Quote } from '../../models/quote.model';
     }
     .btn-refresh:disabled { opacity: .35; cursor: not-allowed; }
     .btn-refresh:not(:disabled):hover { border-color: #1890ff; color: #1890ff; }
+
+    .btn-new {
+      padding: .4rem .9rem;
+      border: 1px solid #1890ff;
+      border-radius: 4px;
+      background: white;
+      color: #1890ff;
+      cursor: pointer;
+      font-size: .875rem;
+      white-space: nowrap;
+    }
+    .btn-new:hover      { background: #e6f4ff; }
+    .btn-new-active     { background: #fff2f0; border-color: #ff4d4f; color: #ff4d4f; }
+    .btn-new-active:hover { background: #fff2f0; }
 
     .btn-retry {
       padding: .45rem 1.2rem;
@@ -377,8 +410,9 @@ export class QuotesListComponent implements OnInit {
   readonly svc  = inject(QuotesService);
   readonly auth = inject(AuthService);
 
-  // ── Component-local signal ───────────────────────────────────────────────
-  readonly searchTerm = signal('');
+  // ── Component-local signals ──────────────────────────────────────────────
+  readonly searchTerm     = signal('');
+  readonly showCreateForm = signal(false);
 
   // ── Derived state (computed) ─────────────────────────────────────────────
 
@@ -443,6 +477,15 @@ export class QuotesListComponent implements OnInit {
 
   refresh(): void {
     this.svc.load();
+  }
+
+  toggleCreateForm(): void {
+    this.showCreateForm.update(v => !v);
+  }
+
+  onQuoteCreated(): void {
+    this.svc.load();           // refresh list with newly-created quote
+    // form stays open — user sees the success banner and can add another
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

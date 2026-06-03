@@ -1,8 +1,8 @@
 import { inject, Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Subject, switchMap } from 'rxjs';
+import { Observable, Subject, map, switchMap } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Quote, QuotesResponse } from '../models/quote.model';
+import { CreateQuoteRequest, Quote, QuotesResponse } from '../models/quote.model';
 
 @Injectable({ providedIn: 'root' })
 export class QuotesService {
@@ -71,5 +71,17 @@ export class QuotesService {
 
   clearSelection(): void {
     this.selectedQuote.set(null);
+  }
+
+  /**
+   * POST /api/quotes
+   * The backend returns the created Quote entity, but callers trigger
+   * a list reload via load() rather than parsing the raw entity shape
+   * (which differs from the GET DTO — "text" vs "quoteText").
+   */
+  createQuote(request: CreateQuoteRequest): Observable<void> {
+    return this.http
+      .post<unknown>(`${this.API}/api/quotes`, request)
+      .pipe(map(() => void 0));
   }
 }

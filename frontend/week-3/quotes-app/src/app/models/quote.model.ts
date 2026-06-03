@@ -20,3 +20,13 @@ export interface LoginResponse {
   refresh_token: string;
   expires_in: number;
 }
+
+/**
+ * Request body for POST /api/quotes.
+ * Field names match the backend CreateQuoteRequest DTO exactly.
+ * Note: "text" here, not "quoteText" — that is the GET-response DTO field.
+ */
+export interface CreateQuoteRequest {
+  author: string;
+  text: string;
+}
