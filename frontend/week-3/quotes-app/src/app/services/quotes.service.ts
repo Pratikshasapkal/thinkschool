@@ -79,6 +79,10 @@ export class QuotesService {
    * a list reload via load() rather than parsing the raw entity shape
    * (which differs from the GET DTO — "text" vs "quoteText").
    */
+  getById(id: number): Observable<Quote> {
+    return this.http.get<Quote>(`${this.API}/api/quotes/${id}`);
+  }
+
   createQuote(request: CreateQuoteRequest): Observable<void> {
     return this.http
       .post<unknown>(`${this.API}/api/quotes`, request)

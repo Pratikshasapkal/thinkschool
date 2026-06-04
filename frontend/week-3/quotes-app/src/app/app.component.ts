@@ -1,21 +1,11 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { AuthService } from './services/auth.service';
-import { LoginComponent } from './components/login/login.component';
-import { QuotesListComponent } from './components/quotes-list/quotes-list.component';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [LoginComponent, QuotesListComponent],
+  imports: [RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    @if (auth.isLoggedIn()) {
-      <app-quotes-list />
-    } @else {
-      <app-login />
-    }
-  `
+  template: `<router-outlet />`,
 })
-export class AppComponent {
-  auth = inject(AuthService);
-}
+export class AppComponent {}

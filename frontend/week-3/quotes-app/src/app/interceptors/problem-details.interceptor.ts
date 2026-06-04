@@ -41,6 +41,13 @@ function toAppError(err: HttpErrorResponse): AppError {
     };
   }
 
+  if (err.status === 404) {
+    return {
+      kind: 'not-found',
+      message: body?.detail ?? body?.title ?? 'Not found.',
+    };
+  }
+
   if (err.status >= 500) {
     return { kind: 'server', message: 'Server error — try again later.' };
   }

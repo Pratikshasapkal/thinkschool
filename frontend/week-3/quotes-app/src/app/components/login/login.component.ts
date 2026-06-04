@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 
 @Component({
@@ -51,7 +52,8 @@ import { AuthService } from '../../services/auth.service';
   `]
 })
 export class LoginComponent {
-  private auth = inject(AuthService);
+  private auth   = inject(AuthService);
+  private router = inject(Router);
 
   email = '';
   password = '';
@@ -64,11 +66,14 @@ export class LoginComponent {
     this.error.set(null);
 
     this.auth.login({ email: this.email, password: this.password }).subscribe({
-      next: () => this.loading.set(false),
+      next: () => {
+        this.loading.set(false);
+        this.router.navigate(['/quotes']);
+      },
       error: () => {
         this.error.set('Invalid email or password.');
         this.loading.set(false);
-      }
+      },
     });
   }
 }

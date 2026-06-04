@@ -1,5 +1,5 @@
 export interface AppError {
-  kind: 'validation' | 'authorization' | 'server' | 'network';
+  kind: 'validation' | 'authorization' | 'not-found' | 'server' | 'network';
   message: string;
 }
 
