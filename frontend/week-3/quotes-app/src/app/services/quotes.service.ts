@@ -1,13 +1,15 @@
-import { inject, Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, Subject, map, switchMap } from 'rxjs';
+import { Observable, Subject, map, switchMap, tap } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CreateQuoteRequest, Quote, QuotesResponse } from '../models/quote.model';
+import { AppError } from '../models/app-error.model';
+import { environment } from '../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class QuotesService {
   private readonly http = inject(HttpClient);
-  private readonly API  = 'http://localhost:5032';
+  private readonly API  = environment.apiBaseUrl;
 
   // ── Race-condition channel ───────────────────────────────────────────────
   // Every call to load() pushes params here. switchMap cancels the previous
@@ -21,6 +23,11 @@ export class QuotesService {
   readonly error         = signal<string | null>(null);
   readonly totalCount    = signal(0);
   readonly selectedQuote = signal<Quote | null>(null);
+
+  // ── Computed ─────────────────────────────────────────────────────────────
+  readonly isEmpty = computed(
+    () => !this.loading() && !this.error() && this.quotes().length === 0
+  );
 
   constructor() {
     this.load$
@@ -52,8 +59,9 @@ export class QuotesService {
             this.selectedQuote.set(fresh ?? null);
           }
         },
-        error: () => {
-          this.error.set('Failed to load quotes. Is the API running on port 5032?');
+        error: (err: unknown) => {
+          const appErr = err as AppError;
+          this.error.set(appErr?.message ?? 'Failed to load quotes.');
           this.loading.set(false);
         },
       });
@@ -80,7 +88,9 @@ export class QuotesService {
    * (which differs from the GET DTO — "text" vs "quoteText").
    */
   getById(id: number): Observable<Quote> {
-    return this.http.get<Quote>(`${this.API}/api/quotes/${id}`);
+    return this.http
+      .get<Quote>(`${this.API}/api/quotes/${id}`)
+      .pipe(tap(q => this.selectedQuote.set(q)));
   }
 
   createQuote(request: CreateQuoteRequest): Observable<void> {

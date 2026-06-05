@@ -2,11 +2,12 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { tap } from 'rxjs';
 import { LoginRequest, LoginResponse } from '../models/quote.model';
+import { environment } from '../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private http = inject(HttpClient);
-  private readonly API = 'http://localhost:5032';
+  private readonly API = environment.apiBaseUrl;
 
   token     = signal<string | null>(null);
   isLoggedIn = computed(() => !!this.token());
