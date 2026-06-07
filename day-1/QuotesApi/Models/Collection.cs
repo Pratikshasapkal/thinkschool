@@ -1,4 +1,5 @@
 namespace QuotesApi.Models;
+
 using QuotesApi.Abstractions;
 
 public class Collection
@@ -9,14 +10,22 @@ public class Collection
 
     public int OwnerId { get; private set; }
 
+    private readonly IClock _clock;
+
     public List<CollectionItem> Items { get; private set; } = new();
 
-    private Collection() { }
+    private Collection()
+    {
+        _clock = default!;
+    }
 
     public Collection(
         string name,
-        int ownerId)
+        int ownerId,
+        IClock clock)
     {
+        _clock = clock;
+
         SetName(name);
 
         OwnerId = ownerId;
@@ -39,7 +48,7 @@ public class Collection
         Name = name;
     }
 
-    public void AddItem(int quoteId, IClock clock)
+    public void AddItem(int quoteId)
     {
         if (Items.Count >= 50)
         {
@@ -53,24 +62,17 @@ public class Collection
                 "Duplicate quote is not allowed");
         }
 
-        var nextId = Items.Count == 0 ? 1 : Items.Max(x => x.Id) + 1;
-
         Items.Add(new CollectionItem(
             quoteId,
-            clock.UtcNow.UtcDateTime,
-            nextId));
+            (_clock?.UtcNow ?? DateTimeOffset.UtcNow).UtcDateTime));
     }
 
     public void RemoveItem(int quoteId)
     {
         var item = Items.FirstOrDefault(
-            x => x.QuoteId == quoteId);
-
-        if (item == null)
-        {
-            throw new InvalidOperationException(
+            x => x.QuoteId == quoteId)
+            ?? throw new InvalidOperationException(
                 "Quote not found in collection");
-        }
 
         Items.Remove(item);
     }
@@ -79,17 +81,17 @@ public class Collection
 public class CollectionItem
 {
     public int Id { get; private set; }
+
     public int QuoteId { get; private set; }
 
     public DateTime AddedAt { get; private set; }
 
     public CollectionItem(
         int quoteId,
-        DateTime addedAt,
-        int id)
+        DateTime addedAt)
     {
-        Id = id;
         QuoteId = quoteId;
+
         AddedAt = addedAt;
     }
 
