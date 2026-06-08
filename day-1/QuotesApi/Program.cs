@@ -603,9 +603,10 @@ if (!app.Environment.IsEnvironment("Testing"))
     // }
 }
 
-using (var tempScope = builder.Services.BuildServiceProvider().CreateScope())
+if (app.Environment.IsDevelopment())
 {
-    var context = tempScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    using var benchScope = app.Services.CreateScope();
+    var context = benchScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
     // ---------------- TRACKED QUERY ----------------
 
@@ -704,6 +705,5 @@ using (var tempScope = builder.Services.BuildServiceProvider().CreateScope())
 
     Console.WriteLine($"Client-side rows: {clientEval.Count}");
 }
-
 
 app.Run();
