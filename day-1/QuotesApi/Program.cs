@@ -112,14 +112,28 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddScoped<IAuthorizationHandler, DeleteOwnQuoteHandler>();
 
-builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
+builder.Services.AddDbContext<AppDbContext>((_, options) =>
 {
     options.UseSqlServer(
-        "Server=tcp:pratiksha-sql-server-01.database.windows.net,1433;Initial Catalog=quotes-sql-db;Persist Security Info=False;User ID=pratiksha-quotesdb;Password=@Database123;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
-    );
+        builder.Configuration.GetConnectionString("DefaultConnection")!);
 
-    options.EnableSensitiveDataLogging();
-    options.LogTo(Console.WriteLine, LogLevel.Information);
+    if (builder.Environment.IsDevelopment())
+    {
+        options.EnableSensitiveDataLogging();
+        options.LogTo(Console.WriteLine, LogLevel.Information);
+    }
+});
+
+var allowedOrigins = builder.Configuration["AllowedOrigins"]
+    ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    ?? ["http://localhost:4200", "https://mango-river-03f3a6100.7.azurestaticapps.net"];
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Angular", policy =>
+        policy.WithOrigins(allowedOrigins)
+              .AllowAnyHeader()
+              .AllowAnyMethod());
 });
 
 builder.Services.AddScoped<
@@ -192,6 +206,8 @@ async Task RevokeFamily(AppDbContext db, string familyId, CancellationToken ct)
 var app = builder.Build();
 
 app.UseResponseCompression();
+app.UseRouting();
+app.UseCors("Angular");
 app.UseAuthentication();
 app.UseAuthorization();
 
