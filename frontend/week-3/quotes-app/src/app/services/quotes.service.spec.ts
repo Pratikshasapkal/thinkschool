@@ -1,14 +1,20 @@
+/// <reference types="jasmine" />
+
 /**
  * Characterisation tests – pin the real API contract before touching any
  * HttpClient / interceptor code.  If ANY assertion below fails after a backend
  * change, the contract has been broken and downstream UI code will be affected.
+ *
+ * Real backend contract (GET /api/quotes):
+ *   Response body: Quote[]          (array, not { value, count })
+ *   Field names:   id, author, text, createdAt
  */
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { QuotesService } from './quotes.service';
-import { Quote, QuotesResponse } from '../models/quote.model';
+import { Quote } from '../models/quote.model';
 
 describe('QuotesService – API contract characterisation', () => {
   let service: QuotesService;
@@ -20,7 +26,7 @@ describe('QuotesService – API contract characterisation', () => {
   const makeQuote = (overrides: Partial<Quote> = {}): Quote => ({
     id:        1000508,
     author:    'SignalFormsTest',
-    quoteText: 'Day 14 Piece 2 Signal Forms verification',
+    text:      'Day 14 Piece 2 Signal Forms verification',
     createdAt: '2026-06-03T12:51:20.1381383',
     ...overrides,
   });
@@ -38,10 +44,10 @@ describe('QuotesService – API contract characterisation', () => {
 
   afterEach(() => httpMock.verify());
 
-  // ── GET wrapper shape ──────────────────────────────────────────────────────
+  // ── GET response shape ─────────────────────────────────────────────────────
 
-  it('GET response wrapper has "value" array and "count" number', () => {
-    const body: QuotesResponse = { value: [makeQuote()], count: 1 };
+  it('GET response is a Quote[] array (not a wrapped object)', () => {
+    const body: Quote[] = [makeQuote()];
 
     service.load(1, 10);
     httpMock.expectOne(QUOTES_EP).flush(body);
@@ -50,52 +56,52 @@ describe('QuotesService – API contract characterisation', () => {
     expect(typeof service.totalCount()).toBe('number');
   });
 
-  it('"value" array is mapped to the quotes signal', () => {
+  it('array is mapped directly to the quotes signal', () => {
     const q = makeQuote();
 
     service.load(1, 10);
-    httpMock.expectOne(QUOTES_EP).flush({ value: [q], count: 1 });
+    httpMock.expectOne(QUOTES_EP).flush([q]);
 
     expect(service.quotes()).toEqual([q]);
   });
 
-  it('"count" is mapped to the totalCount signal', () => {
+  it('totalCount signal is set to the array length', () => {
     service.load(1, 10);
-    httpMock.expectOne(QUOTES_EP).flush({ value: [], count: 99 });
+    httpMock.expectOne(QUOTES_EP).flush([makeQuote(), makeQuote({ id: 2 })]);
 
-    expect(service.totalCount()).toBe(99);
+    expect(service.totalCount()).toBe(2);
   });
 
   // ── GET Quote field names ──────────────────────────────────────────────────
 
   it('each Quote in GET response has "id" typed as number', () => {
     service.load(1, 10);
-    httpMock.expectOne(QUOTES_EP).flush({ value: [makeQuote({ id: 1000508 })], count: 1 });
+    httpMock.expectOne(QUOTES_EP).flush([makeQuote({ id: 1000508 })]);
 
     expect(typeof service.quotes()[0].id).toBe('number');
   });
 
   it('each Quote in GET response has "author" typed as string', () => {
     service.load(1, 10);
-    httpMock.expectOne(QUOTES_EP).flush({ value: [makeQuote({ author: 'Alice' })], count: 1 });
+    httpMock.expectOne(QUOTES_EP).flush([makeQuote({ author: 'Alice' })]);
 
     expect(typeof service.quotes()[0].author).toBe('string');
   });
 
-  it('GET uses "quoteText" — NOT "text" — for the body field', () => {
-    const q = makeQuote({ quoteText: 'Hello World' });
+  it('GET uses "text" — NOT "quoteText" — for the body field', () => {
+    const q = makeQuote({ text: 'Hello World' });
 
     service.load(1, 10);
-    httpMock.expectOne(QUOTES_EP).flush({ value: [q], count: 1 });
+    httpMock.expectOne(QUOTES_EP).flush([q]);
 
-    expect(service.quotes()[0].quoteText).toBe('Hello World');
-    // Breaking change detector: if backend renames quoteText → text this line fails.
-    expect((service.quotes()[0] as unknown as Record<string, unknown>)['text']).toBeUndefined();
+    expect(service.quotes()[0].text).toBe('Hello World');
+    // Breaking change detector: if backend renames text → quoteText this line fails.
+    expect((service.quotes()[0] as unknown as Record<string, unknown>)['quoteText']).toBeUndefined();
   });
 
   it('each Quote in GET response has "createdAt" typed as string', () => {
     service.load(1, 10);
-    httpMock.expectOne(QUOTES_EP).flush({ value: [makeQuote()], count: 1 });
+    httpMock.expectOne(QUOTES_EP).flush([makeQuote()]);
 
     expect(typeof service.quotes()[0].createdAt).toBe('string');
   });

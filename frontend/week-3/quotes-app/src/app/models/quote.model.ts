@@ -1,13 +1,8 @@
 export interface Quote {
   id: number;
   author: string;
-  quoteText: string;
+  text: string;
   createdAt: string;
-}
-
-export interface QuotesResponse {
-  value: Quote[];
-  count: number;
 }
 
 export interface LoginRequest {
@@ -21,11 +16,6 @@ export interface LoginResponse {
   expires_in: number;
 }
 
-/**
- * Request body for POST /api/quotes.
- * Field names match the backend CreateQuoteRequest DTO exactly.
- * Note: "text" here, not "quoteText" — that is the GET-response DTO field.
- */
 export interface CreateQuoteRequest {
   author: string;
   text: string;

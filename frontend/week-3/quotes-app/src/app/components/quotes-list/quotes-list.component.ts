@@ -114,7 +114,7 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
                   [routerLink]="['/quotes', quote.id]"
                   [style.view-transition-name]="'quote-' + quote.id"
                 >
-                  <p class="row-text">"{{ quote.quoteText }}"</p>
+                  <p class="row-text">"{{ quote.text }}"</p>
                   <span class="row-author">— {{ quote.author }}</span>
                 </li>
               }

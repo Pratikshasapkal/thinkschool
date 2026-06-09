@@ -1,8 +1,8 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, Subject, map, switchMap, tap } from 'rxjs';
+import { EMPTY, Observable, Subject, catchError, map, switchMap, tap } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CreateQuoteRequest, Quote, QuotesResponse } from '../models/quote.model';
+import { CreateQuoteRequest, Quote } from '../models/quote.model';
 import { AppError } from '../models/app-error.model';
 import { environment } from '../../environments/environment';
 
@@ -33,37 +33,37 @@ export class QuotesService {
     this.load$
       .pipe(
         switchMap(({ page, size }) =>
-          this.http.get<QuotesResponse>(
+          this.http.get<Quote[]>(
             `${this.API}/api/quotes?page=${page}&size=${size}`
+          ).pipe(
+            catchError((err: unknown) => {
+              const appErr = err as AppError;
+              this.error.set(appErr?.message ?? 'Failed to load quotes.');
+              this.loading.set(false);
+              return EMPTY;
+            })
           )
         ),
         takeUntilDestroyed()
       )
-      .subscribe({
-        next: res => {
-          this.quotes.set(res.value);
-          this.totalCount.set(res.count);
-          this.loading.set(false);
+      .subscribe(res => {
+        this.quotes.set(res);
+        this.totalCount.set(res.length);
+        this.loading.set(false);
 
-          // ── Stale-detail guard ─────────────────────────────────────────
-          // After every refresh the in-memory selectedQuote snapshot may
-          // be outdated.  Two cases:
-          //   • quote still on this page → replace reference with fresh data
-          //     so the detail panel always reflects the latest server values.
-          //   • quote absent from this page → clear selection; showing stale
-          //     data that the server no longer returns on this page would be
-          //     misleading.
-          const sel = this.selectedQuote();
-          if (sel !== null) {
-            const fresh = res.value.find(q => q.id === sel.id);
-            this.selectedQuote.set(fresh ?? null);
-          }
-        },
-        error: (err: unknown) => {
-          const appErr = err as AppError;
-          this.error.set(appErr?.message ?? 'Failed to load quotes.');
-          this.loading.set(false);
-        },
+        // ── Stale-detail guard ─────────────────────────────────────────
+        // After every refresh the in-memory selectedQuote snapshot may
+        // be outdated.  Two cases:
+        //   • quote still on this page → replace reference with fresh data
+        //     so the detail panel always reflects the latest server values.
+        //   • quote absent from this page → clear selection; showing stale
+        //     data that the server no longer returns on this page would be
+        //     misleading.
+        const sel = this.selectedQuote();
+        if (sel !== null) {
+          const fresh = res.find((q: Quote) => q.id === sel.id);
+          this.selectedQuote.set(fresh ?? null);
+        }
       });
   }
 

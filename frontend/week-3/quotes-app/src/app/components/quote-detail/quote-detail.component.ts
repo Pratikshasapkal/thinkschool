@@ -71,7 +71,7 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
 
           @case ('loaded') {
             @if (quote(); as q) {
-              <blockquote class="detail-quote">"{{ q.quoteText }}"</blockquote>
+              <blockquote class="detail-quote">"{{ q.text }}"</blockquote>
               <footer class="detail-footer">
                 <span class="detail-author">— {{ q.author }}</span>
                 <span class="detail-date">{{ formatDate(q.createdAt) }}</span>
