@@ -113,8 +113,12 @@ builder.Services.AddScoped<IAuthorizationHandler, DeleteOwnQuoteHandler>();
 
 builder.Services.AddDbContext<AppDbContext>((_, options) =>
 {
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection")!);
+    var connStr = builder.Configuration.GetConnectionString("DefaultConnection");
+
+    if (string.IsNullOrEmpty(connStr))
+        options.UseSqlite("Data Source=dev.db");
+    else
+        options.UseSqlServer(connStr);
 
     if (builder.Environment.IsDevelopment())
     {
@@ -588,18 +592,21 @@ app.MapPost("/api/auth/refresh", async (
 if (!app.Environment.IsEnvironment("Testing"))
 {
     using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-    var db = scope.ServiceProvider
-        .GetRequiredService<AppDbContext>();
+    var connStr = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrEmpty(connStr))
+    {
+        // No SQL Server configured → SQLite local dev.
+        // EnsureCreated() generates the schema from the model without migrations.
+        db.Database.EnsureCreated();
 
-    // if (!db.Users.Any())
-    // {
-    //     db.Users.Add(new User(
-    //         "admin@example.com",
-    //         "password123"));
-
-    //     db.SaveChanges();
-    // }
+        if (!db.Users.Any())
+        {
+            db.Users.Add(new User("admin@example.com", "password123"));
+            db.SaveChanges();
+        }
+    }
 }
 
 app.Run();
