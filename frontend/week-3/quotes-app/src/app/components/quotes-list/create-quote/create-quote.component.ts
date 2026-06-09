@@ -274,7 +274,7 @@ interface QuoteFormModel {
       outline: none;
       transition: border-color .12s;
     }
-    .field-input:focus { border-color: #1890ff; box-shadow: 0 0 0 2px #1890ff20; }
+    .field-input:focus { border-color: #0052cc; box-shadow: 0 0 0 2px #0052cc20; }
 
     .field-textarea {
       resize: vertical;
@@ -346,8 +346,8 @@ interface QuoteFormModel {
     .btn-secondary:not(:disabled):hover { border-color: #aaa; }
 
     .btn-primary {
-      background: #1890ff;
-      border-color: #1890ff;
+      background: #0052cc;
+      border-color: #0052cc;
       color: white;
     }
     .btn-primary:not(:disabled):hover { background: #40a9ff; border-color: #40a9ff; }

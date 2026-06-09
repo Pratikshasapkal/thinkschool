@@ -165,14 +165,14 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
       line-height: 1;
     }
     .btn-refresh:disabled { opacity: .35; cursor: not-allowed; }
-    .btn-refresh:not(:disabled):hover { border-color: #1890ff; color: #1890ff; }
+    .btn-refresh:not(:disabled):hover { border-color: #0052cc; color: #0052cc; }
 
     .btn-new {
       padding: .4rem .9rem;
-      border: 1px solid #1890ff;
+      border: 1px solid #0052cc;
       border-radius: 4px;
       background: white;
-      color: #1890ff;
+      color: #0052cc;
       cursor: pointer;
       font-size: .875rem;
       white-space: nowrap;
@@ -207,8 +207,8 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
       font-size: 1rem;
       outline: none;
     }
-    .search:focus { border-color: #1890ff; }
-    .stats { font-size: .83rem; color: #888; white-space: nowrap; }
+    .search:focus { border-color: #0052cc; }
+    .stats { font-size: .83rem; color: #595959; white-space: nowrap; }
 
     /* ── List panel ────────────────────────────────────────────────────── */
     .list-panel { min-height: 420px; }
@@ -232,7 +232,7 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
       transition: border-color .12s, background .12s;
     }
     .quote-row:hover         { border-color: #91caff; }
-    .quote-row:focus-visible { box-shadow: 0 0 0 2px #1890ff50; border-color: #1890ff; }
+    .quote-row:focus-visible { box-shadow: 0 0 0 2px #0052cc50; border-color: #0052cc; }
 
     .row-text {
       margin: 0 0 .35rem;
@@ -244,7 +244,7 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .row-author { font-size: .78rem; color: #aaa; font-style: italic; }
+    .row-author { font-size: .78rem; color: #595959; font-style: italic; }
 
     /* ── State boxes (loading / error / empty) ─────────────────────────── */
     .state-box {
@@ -257,7 +257,7 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
       border-radius: 8px;
       border: 1px dashed #e0e0e0;
       background: #fafafa;
-      color: #999;
+      color: #595959;
       text-align: center;
       padding: 2rem;
     }
@@ -274,7 +274,7 @@ import { CreateQuoteComponent } from './create-quote/create-quote.component';
       width: 30px;
       height: 30px;
       border: 3px solid #e6e6e6;
-      border-top-color: #1890ff;
+      border-top-color: #0052cc;
       border-radius: 50%;
       animation: spin .65s linear infinite;
     }

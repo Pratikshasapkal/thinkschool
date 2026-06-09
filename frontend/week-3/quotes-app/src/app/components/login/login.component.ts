@@ -17,9 +17,12 @@ import { AuthService } from '../../services/auth.service';
           <p class="error">{{ error() }}</p>
         }
 
-        <input [(ngModel)]="email" type="email" placeholder="Email" />
-        <input [(ngModel)]="password" type="password" placeholder="Password"
-               (keyup.enter)="login()" />
+        <label for="email" class="sr-only">Email address</label>
+        <input id="email" [(ngModel)]="email" type="email" placeholder="Email"
+               autocomplete="username" />
+        <label for="password" class="sr-only">Password</label>
+        <input id="password" [(ngModel)]="password" type="password" placeholder="Password"
+               autocomplete="current-password" (keyup.enter)="login()" />
 
         <button (click)="login()" [disabled]="loading()">
           {{ loading() ? 'Signing in…' : 'Sign in' }}
@@ -42,13 +45,14 @@ import { AuthService } from '../../services/auth.service';
       padding: .6rem .8rem; border: 1px solid #d9d9d9;
       border-radius: 4px; font-size: 1rem; outline: none;
     }
-    input:focus { border-color: #1890ff; }
+    input:focus { border-color: #0052cc; }
     button {
-      padding: .7rem; background: #1890ff; color: white;
+      padding: .7rem; background: #0052cc; color: white;
       border: none; border-radius: 4px; font-size: 1rem; cursor: pointer;
     }
     button:disabled { opacity: .6; cursor: not-allowed; }
-    .error { color: #ff4d4f; font-size: .875rem; margin: 0; }
+    .error { color: #c0392b; font-size: .875rem; margin: 0; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   `]
 })
 export class LoginComponent {

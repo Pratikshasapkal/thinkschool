@@ -110,7 +110,7 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
       text-decoration: none;
     }
     .btn-back:hover { border-color: #aaa; }
-    .crumb { font-size: .85rem; color: #aaa; }
+    .crumb { font-size: .85rem; color: #595959; }
 
     /* ── Detail card ─────────────────────────────────────────────────── */
     .detail-card {
@@ -140,7 +140,7 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
       gap: .75rem;
       padding: 2rem;
       text-align: center;
-      color: #999;
+      color: #595959;
     }
     .state-error { color: #cf1322; }
     .state-title { margin: 0; font-weight: 600; font-size: .95rem; }
@@ -151,7 +151,7 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
       width: 30px;
       height: 30px;
       border: 3px solid #e6e6e6;
-      border-top-color: #1890ff;
+      border-top-color: #0052cc;
       border-radius: 50%;
       animation: spin .65s linear infinite;
     }
@@ -161,9 +161,9 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
     .btn-action {
       padding: .45rem 1.2rem;
       background: white;
-      border: 1px solid #1890ff;
+      border: 1px solid #0052cc;
       border-radius: 4px;
-      color: #1890ff;
+      color: #0052cc;
       text-decoration: none;
       font-size: .875rem;
       cursor: pointer;
@@ -179,7 +179,7 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
     .detail-quote {
       margin: 0 0 1.5rem;
       padding-left: 1rem;
-      border-left: 3px solid #1890ff;
+      border-left: 3px solid #0052cc;
       font-size: 1.2rem;
       line-height: 1.85;
       color: #1a1a1a;
@@ -195,8 +195,8 @@ type DetailState = 'loading' | 'loaded' | 'not-found' | 'unauthorized' | 'error'
       flex-wrap: wrap;
     }
     .detail-author { font-weight: 700; color: #333; font-style: normal; }
-    .detail-date   { color: #aaa; }
-    .detail-id     { font-size: .75rem; color: #ccc; }
+    .detail-date   { color: #595959; }
+    .detail-id     { font-size: .75rem; color: #595959; }
   `],
 })
 export class QuoteDetailComponent implements OnInit {
