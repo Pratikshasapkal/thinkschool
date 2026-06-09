@@ -349,7 +349,7 @@ app.MapGet("/api/quotes", async (
 {
     var quotes = await db.Quotes
         .Where(q => !q.IsDeleted)
-        .OrderBy(q => q.Id)
+        .OrderByDescending(q => q.Id)
         .Skip((page - 1) * size)
         .Take(size)
         .ToListAsync(cancellationToken);
