@@ -14,7 +14,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Diagnostics;
 using Microsoft.AspNetCore.ResponseCompression;
 
 
@@ -601,109 +600,6 @@ if (!app.Environment.IsEnvironment("Testing"))
 
     //     db.SaveChanges();
     // }
-}
-
-if (app.Environment.IsDevelopment())
-{
-    using var benchScope = app.Services.CreateScope();
-    var context = benchScope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    // ---------------- TRACKED QUERY ----------------
-
-    GC.Collect();
-    GC.WaitForPendingFinalizers();
-    GC.Collect();
-
-    long trackedBefore = GC.GetAllocatedBytesForCurrentThread();
-
-    var trackedWatch = Stopwatch.StartNew();
-
-    var trackedQuotes = await context.Quotes
-        .OrderBy(q => q.Id)
-        .Take(10000)
-        .ToListAsync();
-
-    trackedWatch.Stop();
-
-    long trackedAfter = GC.GetAllocatedBytesForCurrentThread();
-
-    Console.WriteLine("==== TRACKED QUERY ====");
-    Console.WriteLine($"Rows: {trackedQuotes.Count}");
-    Console.WriteLine($"Time: {trackedWatch.ElapsedMilliseconds} ms");
-    Console.WriteLine($"Allocated: {trackedAfter - trackedBefore} bytes");
-
-
-
-    // ---------------- AS NO TRACKING QUERY ----------------
-
-    GC.Collect();
-    GC.WaitForPendingFinalizers();
-    GC.Collect();
-
-    long noTrackBefore = GC.GetAllocatedBytesForCurrentThread();
-
-    var noTrackWatch = Stopwatch.StartNew();
-
-    var noTrackQuotes = await context.Quotes
-        .AsNoTracking()
-        .OrderBy(q => q.Id)
-        .Take(10000)
-        .ToListAsync();
-
-    noTrackWatch.Stop();
-
-    long noTrackAfter = GC.GetAllocatedBytesForCurrentThread();
-
-    Console.WriteLine("==== AS NO TRACKING QUERY ====");
-    Console.WriteLine($"Rows: {noTrackQuotes.Count}");
-    Console.WriteLine($"Time: {noTrackWatch.ElapsedMilliseconds} ms");
-    Console.WriteLine($"Allocated: {noTrackAfter - noTrackBefore}");
-
-
-
-    // ---------------- FULL ENTITY QUERY ----------------
-
-    Console.WriteLine("==== FULL ENTITY QUERY ====");
-
-    var fullQuotes = await context.Quotes
-        .OrderBy(q => q.Id)
-        .Take(5)
-        .ToListAsync();
-
-
-
-    // ---------------- PROJECTED DTO QUERY ----------------
-
-    Console.WriteLine("==== PROJECTED DTO QUERY ====");
-
-    var projectedQuotes = await context.Quotes
-        .Select(q => new
-        {
-            q.Id,
-            q.Author
-        })
-        .OrderBy(q => q.Id)
-        .Take(5)
-        .ToListAsync();
-
-
-
-    // ---------------- CLIENT SIDE EVALUATION ----------------
-
-    Console.WriteLine("==== CLIENT SIDE EVALUATION ====");
-
-    bool IsLongAuthor(string author)
-    {
-        return author.Length > 10;
-    }
-
-    var clientEval = context.Quotes
-        .AsEnumerable()
-        .Where(q => IsLongAuthor(q.Author))
-        .Take(5)
-        .ToList();
-
-    Console.WriteLine($"Client-side rows: {clientEval.Count}");
 }
 
 app.Run();
