@@ -15,6 +15,8 @@ using System.Text;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.ResponseCompression;
+using Azure.Messaging.ServiceBus;
+using QuotesApi.Messaging;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -145,6 +147,30 @@ builder.Services.AddScoped<
 
 builder.Services.AddTransient<GuidGenerator>();
 builder.Services.AddSingleton<IClock, SystemClock>();
+
+// ── Background task queue ──────────────────────────────────────────────────
+// BackgroundTaskQueue is registered as a singleton so both the HTTP endpoint
+// and the hosted service share the same channel instance.
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddHostedService<QueuedHostedService>();
+
+// ── Azure Service Bus ──────────────────────────────────────────────────────
+var sbOptions = builder.Configuration
+    .GetSection(ServiceBusOptions.SectionName)
+    .Get<ServiceBusOptions>() ?? new ServiceBusOptions();
+
+builder.Services.AddSingleton(sbOptions);
+
+// Register the client only when a connection string is present.
+// In production on Azure Container Apps, set ConnectionStrings__ServiceBus
+// (or use DefaultAzureCredential with FullyQualifiedNamespace).
+if (!string.IsNullOrWhiteSpace(sbOptions.ConnectionString))
+{
+    builder.Services.AddSingleton(new ServiceBusClient(sbOptions.ConnectionString));
+    builder.Services.AddSingleton<IMessagePublisher, ServiceBusPublisher>();
+    builder.Services.AddHostedService<QuoteEventConsumer>();
+}
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddResponseCompression(opts =>
 {
@@ -588,6 +614,93 @@ app.MapPost("/api/auth/refresh", async (
 
 
 
+
+// ── Service Bus endpoints ──────────────────────────────────────────────────
+
+// POST /api/messages/publish
+// Publishes a normal "quote.created" event. Returns 202 immediately;
+// subscribers process it asynchronously.
+app.MapPost("/api/messages/publish", async (
+    IServiceProvider  services,
+    CancellationToken cancellationToken) =>
+{
+    var publisher = services.GetService<IMessagePublisher>();
+    if (publisher is null)
+        return Results.Problem(
+            detail: "Service Bus is not configured. Set ServiceBus:ConnectionString.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    var evt = new QuoteEvent(
+        EventType: "quote.created",
+        QuoteId:   Random.Shared.Next(1, 10000),
+        Author:    "Marcus Aurelius");
+
+    await publisher.PublishAsync(evt, cancellationToken);
+
+    return Results.Accepted(value: new
+    {
+        status  = "published",
+        topic   = sbOptions.TopicName,
+        eventType = evt.EventType,
+    });
+});
+
+// POST /api/messages/publish-poison
+// Publishes a message with Poison=true. Every delivery attempt is abandoned
+// by the consumer, so Service Bus retries MaxDeliveryCount times then moves
+// the message to the Dead Letter Queue.
+app.MapPost("/api/messages/publish-poison", async (
+    IServiceProvider  services,
+    CancellationToken cancellationToken) =>
+{
+    var publisher = services.GetService<IMessagePublisher>();
+    if (publisher is null)
+        return Results.Problem(
+            detail: "Service Bus is not configured. Set ServiceBus:ConnectionString.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    var evt = new QuoteEvent(
+        EventType: "quote.poison",
+        QuoteId:   null,
+        Author:    null,
+        Poison:    true);
+
+    await publisher.PublishAsync(evt, cancellationToken);
+
+    return Results.Accepted(value: new
+    {
+        status  = "published",
+        poison  = true,
+        message = "Message will be retried MaxDeliveryCount times then moved to the DLQ.",
+    });
+});
+
+// ── Background task test endpoint ─────────────────────────────────────────
+// Returns 202 immediately; the simulated work runs asynchronously in the
+// QueuedHostedService loop on a background thread.
+app.MapPost("/api/background/test", async (
+    IBackgroundTaskQueue queue,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    var jobId  = Guid.NewGuid().ToString("N")[..8];
+    var logger = loggerFactory.CreateLogger("BackgroundJob");
+
+    await queue.EnqueueAsync(async ct =>
+    {
+        logger.LogInformation(
+            "Job {JobId} started (simulating 5 s of work).", jobId);
+
+        // Simulate long-running work — respects the host shutdown token.
+        await Task.Delay(TimeSpan.FromSeconds(5), ct);
+
+        logger.LogInformation(
+            "Job {JobId} completed.", jobId);
+    }, cancellationToken);
+
+    return Results.Accepted(
+        value: new { jobId, status = "queued", message = "Work item enqueued." });
+});
 
 if (!app.Environment.IsEnvironment("Testing"))
 {

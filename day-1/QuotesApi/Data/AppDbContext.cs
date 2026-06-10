@@ -16,9 +16,10 @@ public class AppDbContext : DbContext
 
     public DbSet<User> Users => Set<User>();
     public DbSet<Quote> Quotes => Set<Quote>();
-
+    public DbSet<Author> Authors => Set<Author>();
     public DbSet<Collection> Collections => Set<Collection>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     protected override void OnModelCreating(
         ModelBuilder modelBuilder)
@@ -35,5 +36,32 @@ public class AppDbContext : DbContext
                     "CollectionId",
                     "Id");
             });
+
+        // Relationship: Author → Quotes via shadow FK "AuthorId" on Quotes table.
+        // Deliberately NO HasIndex("AuthorId") to force a table scan and demonstrate
+        // the missing-index performance problem.
+        modelBuilder.Entity<Author>()
+            .HasMany(a => a.Quotes)
+            .WithOne()
+            .HasForeignKey("AuthorId")
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Idempotency: one record per (MessageId, Subscription) pair.
+        // Two subscriptions each receive every message so the MessageId alone is
+        // not unique across the whole table.
+        modelBuilder.Entity<ProcessedMessage>()
+            .HasIndex(m => new { m.MessageId, m.Subscription })
+            .IsUnique()
+            .HasDatabaseName("IX_ProcessedMessages_MessageId_Subscription");
+
+        // Covering index: AuthorId (seek key) + Text, IsDeleted (INCLUDE columns).
+        // Eliminates the Key Lookup that IX_Quotes_AuthorId alone causes — the query
+        // SELECT AuthorId, Id, Text WHERE IsDeleted=0 is now satisfied entirely from
+        // the index leaf pages, no round-trip to the clustered index per quote row.
+        modelBuilder.Entity<Quote>()
+            .HasIndex("AuthorId")
+            .HasDatabaseName("IX_Quotes_AuthorId_Covering")
+            .IncludeProperties(q => new { q.Text, q.IsDeleted });
     }
 }
