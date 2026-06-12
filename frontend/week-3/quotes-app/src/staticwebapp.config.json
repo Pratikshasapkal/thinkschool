@@ -1,0 +1,18 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/assets/*",
+      "/*.{js,css,ico,png,jpg,gif,svg,woff,woff2,ttf,eot,map}"
+    ]
+  },
+  "globalHeaders": {
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": "default-src 'self'; connect-src 'self' https://quotes-api.livelydune-368712a9.centralindia.azurecontainerapps.io; script-src 'self' 'unsafe-hashes' 'sha256-MhtPZXr7+LpJUY5qtMutB+qWfQtMaPccfe7QXtCcEYc='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:"
+  },
+  "mimeTypes": {
+    ".json": "application/json"
+  }
+}
